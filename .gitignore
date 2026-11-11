@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets / local config
+.env
+*.env
+
+# Local databases and uploads
+db.sqlite3
+pms/backend/media/
+
+# Node
+node_modules/
+dist/
+
+# Editor
+.vscode/
+
+# Docker env dosyaları (örnek hariç)
+!.env.example

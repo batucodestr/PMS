@@ -1,0 +1,54 @@
+# Başlat:  docker compose up -d --build   (PMS/ klasöründe)
+# Ayarlar backend/pms/.env dosyasından okunur (yerel çalıştırma ile aynı dosya).
+# Şablon: backend/pms/.env.example
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ./backend/pms/.env
+    # Postgres imajı POSTGRES_* bekler; .env'deki DATABASE_* değerlerini eşleriz.
+    entrypoint: ["sh", "-c", 'export POSTGRES_DB="$$DATABASE_NAME" POSTGRES_USER="$$DATABASE_USER" POSTGRES_PASSWORD="$$DATABASE_PASSWORD"; exec docker-entrypoint.sh postgres']
+    ports:
+      # pgAdmin/DBeaver için: SADECE bu bilgisayardan erişilir (127.0.0.1), 5434 = yerel Postgres ile çakışmasın.
+      # SUNUCUDA bu 2 satırı sil! Veritabanı internete açılmamalı.
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$DATABASE_USER" -d "$$DATABASE_NAME"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ./backend/pms/.env
+    environment:
+      # Container içinde DB'ye servis adıyla bağlanılır; DEBUG her zaman kapalı.
+      DATABASE_HOST: db
+      DATABASE_PORT: "5432"
+      DJANGO_DEBUG: "False"
+    volumes:
+      - media:/app/media
+      - static:/app/staticfiles
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT:-80}:80"
+    volumes:
+      - media:/var/www/media:ro
+      - static:/var/www/static:ro
+
+volumes:
+  pgdata:
+  media:
+  static:
