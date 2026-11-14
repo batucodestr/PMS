@@ -77,6 +77,10 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+    # Sadece throttle_scope tanımlayan görünümlere uygulanır (ör. /api/public/...).
+    'DEFAULT_THROTTLE_RATES': {
+        'public': os.getenv('PUBLIC_API_THROTTLE_RATE', '300/minute'),
+    },
 }
 
 SIMPLE_JWT = {

@@ -1,8 +1,10 @@
 import io
+from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from PIL import Image
+from rest_framework.test import APITestCase
 
 from apps.core.testing import AuthenticatedAPITestCase, make_property
 from apps.guests.models import Guest
@@ -85,3 +87,63 @@ class PropertyImageTests(AuthenticatedAPITestCase):
             self.assertEqual(res.data['count'], 1)
             image = PropertyImage.objects.get()
             self.assertEqual(self.client.delete(f'/api/property-images/{image.id}/').status_code, 204)
+
+
+class PublicPropertyAPITests(APITestCase):
+    """Tanıtım sitesinin kullandığı /api/public/properties/ uç noktası."""
+
+    def test_anonymous_list_shows_only_active_and_safe_fields(self):
+        make_property(name='Açık Ev', city='Muğla')
+        make_property(name='Pasif Ev', is_active=False)
+        res = self.client.get('/api/public/properties/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['count'], 1)
+        item = res.data['results'][0]
+        self.assertEqual(item['name'], 'Açık Ev')
+        self.assertIsNone(item['image'])
+        for private in ('phone', 'email', 'address', 'postal_code', 'is_active'):
+            self.assertNotIn(private, item)
+
+    def test_detail_and_inactive_is_404(self):
+        active = make_property()
+        inactive = make_property(is_active=False)
+        res = self.client.get(f'/api/public/properties/{active.id}/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['id'], str(active.id))
+        self.assertEqual(self.client.get(f'/api/public/properties/{inactive.id}/').status_code, 404)
+
+    def test_filters_and_ordering(self):
+        make_property(name='A', city='İzmir', base_price=Decimal('300'))
+        make_property(name='B', city='Muğla', base_price=Decimal('100'))
+        res = self.client.get('/api/public/properties/?city=Muğla')
+        self.assertEqual([p['name'] for p in res.data['results']], ['B'])
+        res = self.client.get('/api/public/properties/?ordering=base_price')
+        self.assertEqual([p['name'] for p in res.data['results']], ['B', 'A'])
+
+    def test_is_read_only(self):
+        prop = make_property()
+        self.assertEqual(self.client.post('/api/public/properties/', PAYLOAD, format='json').status_code, 405)
+        url = f'/api/public/properties/{prop.id}/'
+        self.assertEqual(self.client.patch(url, {'name': 'x'}, format='json').status_code, 405)
+        self.assertEqual(self.client.delete(url).status_code, 405)
+        self.assertTrue(Property.objects.filter(pk=prop.pk).exists())
+
+    def test_invalid_auth_header_is_ignored(self):
+        make_property()
+        res = self.client.get('/api/public/properties/', HTTP_AUTHORIZATION='Bearer invalid')
+        self.assertEqual(res.status_code, 200)
+
+    def test_image_is_relative_media_path(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp, override_settings(MEDIA_ROOT=tmp):
+            prop = make_property()
+            buf = io.BytesIO()
+            Image.new('RGB', (4, 4), 'red').save(buf, 'PNG')
+            PropertyImage.objects.create(
+                property=prop, image=SimpleUploadedFile('a.png', buf.getvalue(), content_type='image/png'),
+                alt_text='ön cephe',
+            )
+            res = self.client.get('/api/public/properties/')
+            item = res.data['results'][0]
+            self.assertTrue(item['image'].startswith('/media/property_images/'), item['image'])
+            self.assertEqual(item['image_alt'], 'ön cephe')
